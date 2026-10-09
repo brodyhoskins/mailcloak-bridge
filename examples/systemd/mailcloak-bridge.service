@@ -1,0 +1,61 @@
+# mailcloak-bridge, reading /etc/mailcloak/mailcloak.yaml:
+#
+#   systemctl enable --now mailcloak-bridge
+#
+# It runs as the mailcloak user, like the filters, so it can read and write
+# the same state_dir.
+
+[Unit]
+Description=mailcloak IMAP and SMTP bridge
+Documentation=https://github.com/brodyhoskins/mailcloak-bridge
+# The validating resolver mailcloak trusts for DNSSEC.
+Wants=network-online.target unbound.service
+After=network-online.target unbound.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/mailcloak-bridge
+Restart=on-failure
+User=mailcloak
+Group=mailcloak
+
+# Sets $CONFIGURATION_DIRECTORY, $STATE_DIRECTORY and $CACHE_DIRECTORY,
+# which the bridge uses for mailcloak.yaml, state_dir and cache_dir.
+ConfigurationDirectory=mailcloak
+ConfigurationDirectoryMode=0750
+StateDirectory=mailcloak
+StateDirectoryMode=0750
+CacheDirectory=mailcloak-bridge
+CacheDirectoryMode=0700
+UMask=0077
+
+# Ports 993 and 465 without root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

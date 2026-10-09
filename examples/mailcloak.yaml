@@ -1,0 +1,105 @@
+# /etc/mailcloak/mailcloak.yaml: one file for mailcloak-bridge and the
+# mailcloak-encrypt and mailcloak-decrypt filters. The top-level settings
+# (keys, discovery) and encrypt: are mailcloak's, shared by all of them; see
+# mailcloak's examples/mailcloak.yaml for every setting. The bridge uses
+# encrypt:'s mode and key settings, not its listen and output. bridge: is
+# the bridge's own. Path settings may use ${VAR}.
+
+keys:
+  pgp:
+    dir: /etc/mailcloak/pgp
+  smime:
+    dir: /etc/mailcloak/smime
+# Discovered and harvested keys. Default: $STATE_DIRECTORY.
+state_dir: /var/lib/mailcloak
+# dns:
+#   resolver: 127.0.0.1:53             # must validate DNSSEC
+#   trusted_networks: [100.100.100.100]
+discovery:
+  autocrypt: true
+encrypt:
+  mode: opportunistic                  # opportunistic | strict
+  prefer: [pgp, smime]
+
+bridge:
+  # Decrypted messages, so each is decrypted once, and each account's mailbox
+  # state, in accounts/<login>/. These files are plaintext. Protect the
+  # directory like the private keys. Without cache_dir, decrypted messages
+  # are kept in memory only. Under systemd, CacheDirectory= sets this.
+  cache_dir: /var/cache/mailcloak-bridge
+  # cache_memory_bytes: 67108864       # in-memory cache, default 64 MiB
+  # cache_max_age: 2160h               # delete cached messages unread for 90 days.
+                                       # Messages deleted at the provider leave the
+                                       # cache at the next folder sweep.
+  # cache_min_free: 5%                 # free space to leave on the cache's file system:
+                                       # a percentage or a size (2GiB). Below it, the
+                                       # least recently read messages are deleted. 0: off.
+  # cache_compression: auto            # auto: Zstandard, except on a file system that
+                                       # compresses already (Btrfs with compression, zram).
+                                       # zstd: always. off: never. It applies to an
+                                       # account's cache when it is created.
+  # backfill: true                     # after a login, fill every folder's message
+                                       # list in the background, newest first: the
+                                       # header of unchanged mail, the decrypted copy
+                                       # of encrypted mail. It also downloads again
+                                       # what clients read within cache_max_age if
+                                       # the cache lost it. Needs cache_dir.
+
+  # Also encrypt outgoing mail to the sender's own key, and encrypt messages a
+  # client stores (Sent, Drafts) to the sender before they reach the provider.
+  # Then the provider keeps no readable copy, and the bridge decrypts it again.
+  encrypt_to_self: true
+
+  # log: stderr                        # stderr | syslog | none | /path/to/file
+
+  # Every connection uses TLS: from clients, and to the provider. The bridge
+  # never falls back to plaintext. With starttls, a server that does not offer
+  # STARTTLS is an error. tls: none and upstream_tls: none are refused unless
+  # you set this, and then passwords and mail cross the network unprotected.
+  # insecure_plaintext: false
+
+  # The certificate clients see. It must match the name clients connect to,
+  # for example a Tailscale host name. It is reloaded when the files change.
+  tls:
+    cert_file: /etc/mailcloak/tls/fullchain.pem
+    key_file: /etc/mailcloak/tls/privkey.pem
+
+  # Where clients connect. Clients log in with their provider user name and
+  # password. The bridge passes them to the provider and does not store them.
+  imap:
+    listen: ":993"
+    tls: implicit                      # implicit | starttls. COMPRESS=DEFLATE
+                                       # is offered with implicit TLS only.
+    # timeout: 1m
+    # max_message_bytes: 52428800      # largest APPEND
+
+  smtp:
+    listen: ":465"
+    tls: implicit
+    # hostname: bridge.example.ts.net  # greeting and EHLO name, default: host name
+    # timeout: 1m
+    # max_message_bytes: 52428800
+
+  # Which provider each login goes to. match is a full address or a domain
+  # (@example.com). An address match wins over a domain match. The bridge
+  # uses COMPRESS=DEFLATE with any IMAP server that offers it.
+  #
+  # For a login that matches no account, the bridge finds the servers from
+  # the domain: the provider's autoconfig file, DNS SRV records, Mozilla's
+  # ISP database and Exchange Autodiscover, for the domain and then for the
+  # provider behind its MX record. It uses only servers with TLS. To see
+  # what it finds, run: mailcloak-bridge -detect alice@example.com
+  # With autodetect: false, such a login is rejected without contacting
+  # anyone, and accounts is required.
+  # autodetect: true
+  accounts:
+    - match: "@example.com"
+      imap:
+        upstream: imap.example.com:993
+        upstream_tls: implicit         # implicit | starttls
+      smtp:
+        upstream: smtp.example.com:465
+        upstream_tls: implicit
+    - match: "alice@example.org"
+      imap: {upstream: "mail.example.org:993"}
+      smtp: {upstream: "mail.example.org:587", upstream_tls: starttls}

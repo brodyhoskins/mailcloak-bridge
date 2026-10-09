@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# PROVIDE: mailcloak_bridge
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+# Ports below 1024 need root. Listen on high ports in mailcloak.yaml, or allow
+# the mailcloak user with mac_portacl(4).
+
+. /etc/rc.subr
+
+name=mailcloak_bridge
+rcvar=mailcloak_bridge_enable
+
+load_rc_config $name
+
+: ${mailcloak_bridge_config:=/usr/local/etc/mailcloak/mailcloak.yaml}
+: ${mailcloak_bridge_enable:=NO}
+: ${mailcloak_bridge_user:=mailcloak}
+
+command=/usr/sbin/daemon
+pidfile=/var/run/mailcloak/bridge.pid
+command_args="-f -P ${pidfile} -r -S -l mail -s info -T mailcloak-bridge -u ${mailcloak_bridge_user} /usr/local/bin/mailcloak-bridge -config ${mailcloak_bridge_config}"
+start_precmd="install -d -m 0750 -o ${mailcloak_bridge_user} -g ${mailcloak_bridge_user} /var/db/mailcloak && install -d -m 0700 -o ${mailcloak_bridge_user} -g ${mailcloak_bridge_user} /var/cache/mailcloak-bridge && install -d -m 0755 /var/run/mailcloak"
+
+run_rc_command "$1"
