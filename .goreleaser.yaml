@@ -1,0 +1,97 @@
+archives:
+  - files:
+      - examples/**
+      - LICENSE
+      - README.md
+    formats: [tar.gz, tar.zst]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
+
+before:
+  hooks:
+    - go mod verify
+    - rm -rf build
+    - mkdir build
+    - sh -c "git archive --prefix={{ .ProjectName }}-{{ .Version }}/ {{ .FullCommit }} | zstd -19 -q -o build/{{ .ProjectName }}-{{ .Version }}.tar.zst"
+
+builds:
+  - &build
+    binary: mailcloak-bridge
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goarch: ["386", amd64, arm, arm64]
+    goarm: ["6"]
+    goos: [darwin, freebsd, linux, netbsd, openbsd]
+    id: mailcloak-bridge
+    ldflags:
+      - -s -w -X github.com/brodyhoskins/mailcloak-bridge/internal/version.Version={{ .Version }}
+    main: ./cmd/mailcloak-bridge
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - <<: *build
+    goarch: [arm]
+    goarm: ["7"]
+    id: mailcloak-bridge-armv7
+
+changelog:
+  sort: asc
+  use: github
+
+checksum:
+  algorithm: sha256
+  extra_files:
+    - glob: build/{{ .ProjectName }}-{{ .Version }}.tar.zst
+  name_template: SHA256SUMS
+
+nfpms:
+  - &nfpm
+    bindir: /usr/bin
+    contents:
+      - dst: /etc/init.d/mailcloak-bridge
+        file_info:
+          mode: 0755
+        packager: apk
+        src: examples/openrc/mailcloak-bridge
+      - dst: /usr/lib/systemd/system/mailcloak-bridge.service
+        packager: deb
+        src: examples/systemd/mailcloak-bridge.service
+      - dst: /usr/lib/systemd/system/mailcloak-bridge.service
+        packager: rpm
+        src: examples/systemd/mailcloak-bridge.service
+      - dst: /usr/share/doc/mailcloak-bridge/examples
+        src: examples/
+      - dst: /usr/share/doc/mailcloak-bridge/LICENSE
+        src: LICENSE
+      - dst: /usr/share/doc/mailcloak-bridge/README.md
+        src: README.md
+    description: Local IMAP and SMTP bridge that decrypts and encrypts mail with mailcloak's PGP and S/MIME keys, for any mail provider.
+    file_name_template: "{{ .ConventionalFileName }}"
+    formats: [apk, rpm]
+    homepage: https://github.com/brodyhoskins/mailcloak-bridge
+    id: apk-rpm
+    license: MIT
+    maintainer: Brody Hoskins
+    package_name: mailcloak-bridge
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preinstall: packaging/preinstall.sh
+  - <<: *nfpm
+    formats: [deb]
+    id: deb
+    ids: [mailcloak-bridge]
+
+project_name: mailcloak-bridge
+
+release:
+  draft: false
+  extra_files:
+    - glob: build/{{ .ProjectName }}-{{ .Version }}.tar.zst
+  prerelease: auto
+
+source:
+  enabled: true
+  format: tar.gz
+  name_template: "{{ .ProjectName }}-{{ .Version }}"
+  prefix_template: "{{ .ProjectName }}-{{ .Version }}/"
+
+version: 2

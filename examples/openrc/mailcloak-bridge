@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+
+command="/usr/bin/mailcloak-bridge"
+command_args="-config /etc/mailcloak/mailcloak.yaml"
+command_background=true
+command_user="mailcloak:mailcloak"
+# Ports 993 and 465 without root.
+capabilities="^cap_net_bind_service"
+description="mailcloak IMAP and SMTP bridge"
+error_logger="logger -t mailcloak-bridge -p mail.info"
+pidfile="/run/${RC_SVCNAME}.pid"
+
+depend() {
+	need net
+	use dns logger unbound
+}
+
+start_pre() {
+	checkpath -d -m 0750 -o mailcloak:mailcloak /var/lib/mailcloak
+	checkpath -d -m 0700 -o mailcloak:mailcloak /var/cache/mailcloak-bridge
+}
