@@ -24,6 +24,13 @@ builds:
     goarm: ["6"]
     goos: [darwin, freebsd, linux, netbsd, openbsd]
     id: mailcloak-bridge
+    # modernc.org/sqlite does not build for these.
+    ignore:
+      - { goos: netbsd, goarch: "386" }
+      - { goos: netbsd, goarch: arm }
+      - { goos: netbsd, goarch: arm64 }
+      - { goos: openbsd, goarch: "386" }
+      - { goos: openbsd, goarch: arm }
     ldflags:
       - -s -w -X github.com/brodyhoskins/mailcloak-bridge/internal/version.Version={{ .Version }}
     main: ./cmd/mailcloak-bridge
