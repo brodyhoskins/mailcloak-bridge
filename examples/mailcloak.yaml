@@ -41,7 +41,9 @@ bridge:
   # backfill: true                     # after a login, fill every folder's message
                                        # list in the background, newest first: the
                                        # header of unchanged mail, the decrypted copy
-                                       # of encrypted mail. Needs cache_dir.
+                                       # of encrypted mail. It also downloads again
+                                       # what clients read within cache_max_age if
+                                       # the cache lost it. Needs cache_dir.
 
   # Also encrypt outgoing mail to the sender's own key, and encrypt messages a
   # client stores (Sent, Drafts) to the sender before they reach the provider.
