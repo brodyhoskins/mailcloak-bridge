@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/ProtonMail/go-crypto v1.5.2
-	github.com/brodyhoskins/mailcached v0.0.4
+	github.com/brodyhoskins/mailcached v0.0.5
 	github.com/brodyhoskins/mailcloak v0.0.4
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-smtp v0.25.0
@@ -16,6 +16,7 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
+	github.com/emersion/go-msgauth v0.7.0 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.20.1 // indirect
