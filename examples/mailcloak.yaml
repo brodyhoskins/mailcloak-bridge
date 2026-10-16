@@ -50,6 +50,30 @@ bridge:
   # Then the provider keeps no readable copy, and the bridge decrypts it again.
   encrypt_to_self: true
 
+  # Sender authentication, always strict, with nothing to set. Providers
+  # check new mail (DMARC, DKIM, SPF) and write their verdict in its
+  # header, but some deliver failing mail anyway. The bridge reads that
+  # verdict before clients see new mail: every SPF failure is deleted,
+  # softfail (~all) too, even when DMARC passes, and every DMARC failure
+  # goes at least to Junk (deleted under p=reject). It learns which header
+  # fields are the provider's from the mail in INBOX, as a sender can write
+  # such fields too. An empty mailbox sends new mail to Junk until it has
+  # learned them, then moves it back. Mail you move out of Junk stays.
+  #
+  # Crypto mail (encrypted, signed, or with an Autocrypt field) is held to
+  # more: it also goes to Junk when its domain has no DMARC record and
+  # neither DKIM nor SPF passed for that domain, and when the provider's
+  # header has no verdict for it. Autocrypt keys are learned only from mail the
+  # provider said passed. A provider that never reports a verdict is not
+  # supported: once enough mail shows that, logins are refused.
+  #
+  # Each message says whether its sender is verified, and why:
+  #   X-Mailcloak-Authentication: verified; dmarc=none, dkim=pass (next-tms.com), spf=pass (next-tms.com)
+  #   X-Mailcloak-Authentication: failed; dmarc=fail, dkim=pass (evil.example), spf=fail
+  # The first word is verified, failed, unverified (no DMARC record and
+  # nothing tying the message to its domain), unknown (no verdict from the
+  # provider, or no single From address) or vouched (you moved it back).
+
   # log: stderr                        # stderr | syslog | none | /path/to/file
 
   # Every connection uses TLS: from clients, and to the provider. The bridge

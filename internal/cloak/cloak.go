@@ -12,11 +12,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
+
+	"github.com/brodyhoskins/mailcached/engine"
 
 	"github.com/brodyhoskins/mailcloak/config"
 	"github.com/brodyhoskins/mailcloak/discover"
@@ -42,6 +46,10 @@ type Cloak struct {
 	// the bridge removes it.
 	Roots *x509.CertPool
 	Log   *slog.Logger
+	// Harvest learns senders' keys from incoming mail. The bridge runs it
+	// itself, not in the decrypt hook: an Autocrypt key is learned only
+	// from mail that passed sender authentication (harvest).
+	Harvest *discover.Harvester
 
 	pgpPublic openpgp.EntityList // the PGP key directory, to verify signatures
 }
@@ -87,14 +95,14 @@ func New(cfg *config.Config, encryptToSelf bool, log *slog.Logger) (*Cloak, erro
 		return nil, err
 	}
 	if d.Autocrypt || *d.SMIMEHarvest {
-		c.Decrypt.Harvest = &discover.Harvester{
+		c.Harvest = &discover.Harvester{
 			Store:     store(cfg),
 			Autocrypt: d.Autocrypt,
 			SMIME:     *d.SMIMEHarvest,
 			Log:       log,
 		}
 		if *d.SMIMEHarvest {
-			if c.Decrypt.Harvest.SMIMERoots, err = smimeRoots(d.SMIMECAFile); err != nil {
+			if c.Harvest.SMIMERoots, err = smimeRoots(d.SMIMECAFile); err != nil {
 				return nil, err
 			}
 		}
@@ -137,6 +145,7 @@ func (c *Cloak) DecryptMessage(ctx context.Context, raw []byte) Decrypted {
 	if err := c.Decrypt.Middleware(sink).Handle(ctx, &pipeline.Envelope{Data: raw}); err != nil || out == nil {
 		return Decrypted{Data: raw, Verdict: Hold}
 	}
+	c.harvest(ctx, raw, out)
 	if stillEncrypted(out) {
 		return Decrypted{Data: out, Verdict: Hold}
 	}
@@ -169,7 +178,64 @@ func (c *Cloak) DecryptMessage(ctx context.Context, raw []byte) Decrypted {
 	if !decrypted {
 		method = encryptionNone
 	}
-	return Decrypted{Data: c.ownFields(data, method), Verdict: v}
+	if r, ok := engine.AuthResultFrom(ctx); ok && r.Status == engine.AuthUnknown {
+		// The label and the keys wait for a stamp, a new one too
+		// (Live.Watch).
+		v = max(v, Recheck)
+	}
+	return Decrypted{Data: c.ownFields(data, method, authLabel(ctx, data)), Verdict: v}
+}
+
+// harvest learns the sender's keys from raw, and out, the decrypt hook's
+// result. An S/MIME certificate must chain to a trusted CA and name the
+// sender, so it is learned from any message. An Autocrypt key is
+// anyone's word: it is learned only from a message the provider said
+// passed DMARC, so a forged From cannot replace a correspondent's key. The
+// user moving a message back vouches for it, not for its keys.
+func (c *Cloak) harvest(ctx context.Context, raw, out []byte) {
+	if c.Harvest == nil {
+		return
+	}
+	orig, err := mimeutil.Parse(raw)
+	if err != nil {
+		return
+	}
+	final, err := mimeutil.Parse(out)
+	if err != nil {
+		return
+	}
+	// As the decrypt hook sees it: without fields named like its own.
+	orig.Header = orig.Header.Without(func(name string) bool { return strings.HasPrefix(strings.ToLower(name), "x-mailcloak-") })
+	h := *c.Harvest
+	r, ok := engine.AuthResultFrom(ctx)
+	// The pass must be for the address the harvester learns the key for:
+	// mailcached names none (r.From "") when there are several From fields.
+	// Strict mode deletes it on an SPF failure, after this.
+	h.Autocrypt = h.Autocrypt && ok && r.Status == engine.AuthPass && !r.Rescued && r.From != "" &&
+		r.From == firstFrom(orig.Header) && r.SPF != "fail" && r.SPF != "softfail"
+	h.Harvest(orig, final)
+}
+
+// onlyFrom is the address in raw's From field; "" unless there is exactly
+// one field, naming exactly one address.
+func onlyFrom(raw []byte) string {
+	m, err := mimeutil.Parse(raw)
+	if err != nil || len(slices.DeleteFunc(slices.Clone(m.Header), func(f mimeutil.Field) bool {
+		return !strings.EqualFold(f.Name, "From")
+	})) != 1 {
+		return ""
+	}
+	return firstFrom(m.Header)
+}
+
+// firstFrom is the address in the first From field, as the harvester reads
+// it; "" unless it names exactly one.
+func firstFrom(h mimeutil.Header) string {
+	l, err := mail.ParseAddressList(h.Get("From"))
+	if err != nil || len(l) != 1 {
+		return ""
+	}
+	return strings.ToLower(l[0].Address)
 }
 
 // pgpStatus reads the status from an X-Mailcloak-Signature value the
@@ -187,6 +253,74 @@ func pgpStatus(v string) pgp.SignatureStatus {
 	return ""
 }
 
+// HeaderAuthentication says whether the sender is who the From field
+// says (mailcached's sender authentication), so the user sees why a
+// message is in Junk. A word first, then what it rests on:
+//
+//	verified    DMARC passed, or the From domain signed or sent the message
+//	failed      DMARC or SPF failed
+//	unverified  no DMARC record, and nothing ties the message to the domain
+//	unknown     no verdict from the provider, or no single From address
+//	vouched     the user moved the message back after it was moved away
+//
+// for example "verified; dmarc=none, dkim=pass (next-tms.com), spf=pass
+// (next-tms.com)".
+const HeaderAuthentication = "X-Mailcloak-Authentication"
+
+// authLabel is the HeaderAuthentication value for the verdict in ctx on
+// final, the message clients see; "" if there is none.
+func authLabel(ctx context.Context, final []byte) string {
+	r, ok := engine.AuthResultFrom(ctx)
+	if !ok {
+		return ""
+	}
+	if r.From != "" && onlyFrom(final) != r.From {
+		// Unwrapping brought in another From field: the verdict is for
+		// the outer one alone.
+		r.From = ""
+	}
+	var word string
+	switch {
+	case r.Rescued:
+		return "vouched; moved back by you"
+	case r.Status == engine.AuthFail || r.SPF == "fail" || r.SPF == "softfail":
+		word = "failed"
+	case r.From == "" && r.Status != engine.AuthUnknown:
+		// Several From fields: a pass vouches for none of them.
+		word = "unknown"
+	case r.Status == engine.AuthPass:
+		word = "verified"
+	case r.Status == engine.AuthNoPolicy && (r.DKIMAligned || r.SPFAligned):
+		word = "verified"
+	case r.Status == engine.AuthNoPolicy:
+		word = "unverified"
+	default:
+		return "unknown; " + r.Reason
+	}
+	var parts []string
+	if r.DMARC != "" {
+		parts = append(parts, "dmarc="+r.DMARC)
+	}
+	if r.DKIM != "" {
+		d := "dkim=" + r.DKIM
+		if len(r.DKIMDomains) > 0 {
+			d += " (" + strings.Join(r.DKIMDomains, ", ") + ")"
+		}
+		parts = append(parts, d)
+	}
+	if r.SPF != "" {
+		d := "spf=" + r.SPF
+		if r.SPFDomain != "" {
+			d += " (" + r.SPFDomain + ")"
+		}
+		parts = append(parts, d)
+	}
+	if len(parts) == 0 {
+		return word
+	}
+	return word + "; " + strings.Join(parts, ", ")
+}
+
 // HeaderEncryption says how a message reached the provider: "pgp" or
 // "smime" when the bridge decrypted it, encryptionNone when it was not
 // encrypted. It takes the place of the decrypt hook's X-Mailcloak-Decrypted,
@@ -197,15 +331,17 @@ const (
 )
 
 // ownFields makes the header clients see. It replaces
-// X-Mailcloak-Decrypted with X-Mailcloak-Encryption: method, names a PGP
+// X-Mailcloak-Decrypted with X-Mailcloak-Encryption: method, adds
+// X-Mailcloak-Authentication: auth unless it is "", names a PGP
 // signer by address, and removes Autocrypt fields: the decrypt hook has
 // learned their keys, and a client that learned them too would encrypt
 // its replies, which the bridge refuses. It moves the X-Mailcloak-*
-// fields, which the decrypt hook puts first, to the end of the header.
+// fields, which the decrypt hook puts first, to the end of the header, in
+// alphabetical order.
 // The bridge is the last to handle the message, so its fields come after
 // those of the servers before it, and clients that show the header from
 // the top show the sender's fields first.
-func (c *Cloak) ownFields(raw []byte, method string) []byte {
+func (c *Cloak) ownFields(raw []byte, method, auth string) []byte {
 	m, err := mimeutil.Parse(raw)
 	if err != nil {
 		return raw
@@ -216,6 +352,9 @@ func (c *Cloak) ownFields(raw []byte, method string) []byte {
 	}
 	var mine mimeutil.Header
 	mine.Add(HeaderEncryption, method)
+	if auth != "" {
+		mine.Add(HeaderAuthentication, auth)
+	}
 	for _, f := range m.Header {
 		switch {
 		case strings.EqualFold(f.Name, hooks.HeaderSignature):
@@ -224,6 +363,10 @@ func (c *Cloak) ownFields(raw []byte, method string) []byte {
 			mine = append(mine, f)
 		}
 	}
+	// In alphabetical order, so they read the same on every message.
+	slices.SortStableFunc(mine, func(a, b mimeutil.Field) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
 	m.Header = append(m.Header.Without(drop), mine...)
 	return m.Bytes()
 }
