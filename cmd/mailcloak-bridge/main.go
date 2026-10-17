@@ -44,11 +44,22 @@ func main() {
 			if err != nil {
 				return daemon.Hooks{}, err
 			}
+			authorize := cloak.Authorize(log)
 			return daemon.Hooks{
 				Transform: live.Transform(toSelf),
 				Filter:    live.Filter(),
+				// An account whose provider reports no DMARC verdict is
+				// refused: its senders cannot be told from forgeries.
+				Authorize: func(a *engine.Account) error {
+					err := authorize(a)
+					if err == nil {
+						live.Track(a)
+					}
+					return err
+				},
 				// The keys are loaded again when their files change, and
-				// held messages are then tried again with them.
+				// held messages are then tried again with them, as is mail
+				// read before an account learned its provider's stamp.
 				Started: func(eng *engine.Engine) {
 					go live.Watch(context.Background(), keyCheckInterval, eng.Recheck)
 				},

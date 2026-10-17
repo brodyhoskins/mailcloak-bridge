@@ -43,6 +43,12 @@ func Load(path string) (*Config, error) {
 	if err := decode(&mc.Bridge, &c); err != nil {
 		return nil, err
 	}
+	// The bridge always authenticates senders strictly (mailcached's
+	// strict mode): there is nothing to set.
+	if a := c.Authentication; a != "" && a != "strict" {
+		return nil, fmt.Errorf("config: bridge: authentication %q: the bridge always uses strict sender authentication; remove the setting", a)
+	}
+	c.Authentication = "strict"
 	if err := c.Finish(); err != nil {
 		return nil, err
 	}

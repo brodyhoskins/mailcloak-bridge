@@ -83,3 +83,17 @@ func TestExample(t *testing.T) {
 		t.Errorf("alice@example.org smtp = %+v, %v", u, ok)
 	}
 }
+
+// TestStrictAuthentication checks that the bridge always authenticates
+// senders strictly, and refuses a setting that says otherwise.
+func TestStrictAuthentication(t *testing.T) {
+	for _, extra := range []string{"", "  authentication: strict\n"} {
+		c, err := load(t, base+extra)
+		if err != nil || c.Authentication != "strict" {
+			t.Errorf("%q: %v %+v", extra, err, c)
+		}
+	}
+	if _, err := load(t, base+"  authentication: standard\n"); err == nil {
+		t.Error("authentication: standard accepted")
+	}
+}

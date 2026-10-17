@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,7 +27,19 @@ type Live struct {
 	paths []string
 	stamp string
 	log   *slog.Logger
+	// stamped records, by account, its provider's stamp at the last look
+	// (Track).
+	stamped sync.Map
+	// learning is set when mail is read while an account learns a stamp,
+	// the one it had too, or while DNS fails. Which account is not known,
+	// so it is acted on at most every learningRecheck (lastLearning).
+	learning     atomic.Bool
+	lastLearning time.Time
 }
+
+// learningRecheck is how often mail read while an account learned a stamp
+// may cause a Recheck: another account may still be learning one.
+const learningRecheck = 10 * time.Minute
 
 // NewLive builds the Cloak as New does, and remembers how to build it again.
 func NewLive(cfg *config.Config, encryptToSelf bool, log *slog.Logger) (*Live, error) {
@@ -50,15 +63,51 @@ func (l *Live) Cloak() *Cloak { return l.cur.Load() }
 // Transform is Cloak.Transform on the current Cloak, whichever it is when
 // a message passes.
 func (l *Live) Transform(encryptAppends bool) engine.Transform {
-	return &transform{get: l.Cloak, encryptAppends: encryptAppends}
+	return &transform{get: l.Cloak, encryptAppends: encryptAppends, learning: &l.learning}
 }
 
 // Filter is Cloak.Filter on the current Cloak.
 func (l *Live) Filter() smtpproxy.Filter { return filter(l.Cloak) }
 
+// Stamper is an account whose provider stamp Watch looks at
+// (engine.Account).
+type Stamper interface{ AuthState() engine.AuthState }
+
+// Track has Watch look at a's provider stamp.
+// It starts from no stamp: mail read before the login may predate the
+// stamp too.
+func (l *Live) Track(a Stamper) {
+	l.stamped.LoadOrStore(a, "")
+}
+
+func stampOf(a Stamper) string { return strings.Join(a.AuthState().Stamp, ",") }
+
+// learned reports whether a tracked account learned a stamp since the last
+// look, a new one too, or whether one has a stamp after mail was read
+// while one learned it: mail read before then has no verdict yet.
+func (l *Live) learned() bool {
+	learned, stamped := false, false
+	l.stamped.Range(func(a, was any) bool {
+		now := stampOf(a.(Stamper))
+		l.stamped.Store(a, now)
+		learned = learned || now != "" && now != was.(string)
+		stamped = stamped || now != ""
+		return true
+	})
+	if learned {
+		return true
+	}
+	if stamped && time.Since(l.lastLearning) >= learningRecheck && l.learning.Swap(false) {
+		l.lastLearning = time.Now()
+		return true
+	}
+	return false
+}
+
 // Watch checks the key files every interval until ctx ends. After it built
-// the Cloak again, it calls changed. A build that fails keeps the old
-// Cloak, and is tried again at the next change.
+// the Cloak again, or a tracked account learned its stamp, it calls
+// changed. A build that fails keeps the old Cloak, and is tried again at
+// the next change.
 func (l *Live) Watch(ctx context.Context, interval time.Duration, changed func()) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -68,7 +117,7 @@ func (l *Live) Watch(ctx context.Context, interval time.Duration, changed func()
 			return
 		case <-t.C:
 		}
-		if !l.Reload() {
+		if !l.Reload() && !l.learned() {
 			continue
 		}
 		if changed != nil {
