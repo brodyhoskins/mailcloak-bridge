@@ -2,8 +2,8 @@ github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPx
 github.com/ProtonMail/go-crypto v1.5.2/go.mod h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=
 github.com/brodyhoskins/mailcached v0.0.10 h1:SbmLGAcpp1IPoaJUKx8VuO02q/Gga43pO/FtH0OUCkY=
 github.com/brodyhoskins/mailcached v0.0.10/go.mod h1:tL1em4yMF8dNbms6FADv1hZ8KCsOP/j5UH2gFq7qZ60=
-github.com/brodyhoskins/mailcloak v0.0.4 h1:nS3wgrVxP/GVlTiH+JiRoV7gWH6WNy6ribNKDoW702w=
-github.com/brodyhoskins/mailcloak v0.0.4/go.mod h1:9RzVoEDYLIH93RAHr8Tt2fJqPzfX+8hgEiVPBdXQkm0=
+github.com/brodyhoskins/mailcloak v0.0.5 h1:MXvf5tCadkM8WZ1qfKH0LxnNFFpclwymQ/NJv1t6g2o=
+github.com/brodyhoskins/mailcloak v0.0.5/go.mod h1:sjyid7a+NE3Xxn2qDpQ1PaJRq6Z6udR5SskPiA0uBcA=
 github.com/cloudflare/circl v1.6.5 h1:O64F26HEqNhznd/hrC5KZXVKYuKM2rx4deZDTc4ihQA=
 github.com/cloudflare/circl v1.6.5/go.mod h1:h5LNyxAc5nTue9DS5jT+48en2PSDYt3zdGnz5OstK6c=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
