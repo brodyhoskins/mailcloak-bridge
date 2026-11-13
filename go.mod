@@ -5,7 +5,7 @@ go 1.27.4
 require (
 	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/brodyhoskins/mailcached v0.0.10
-	github.com/brodyhoskins/mailcloak v0.0.4
+	github.com/brodyhoskins/mailcloak v0.0.5
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-smtp v0.25.1
 	gopkg.in/yaml.v3 v3.0.1
