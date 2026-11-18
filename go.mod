@@ -7,7 +7,7 @@ require (
 	github.com/brodyhoskins/mailcached v0.0.10
 	github.com/brodyhoskins/mailcloak v0.0.5
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
-	github.com/emersion/go-smtp v0.25.1
+	github.com/emersion/go-smtp v0.26.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
